@@ -47,6 +47,7 @@ function get_boat(boat_id){
   });
 }
 
+// updates boat
 function patch_boat(boatid, payload) {
   return get_boat(boatid)
   .then((boat) => {
@@ -66,18 +67,65 @@ function patch_boat(boatid, payload) {
   });
 }
 
-// // TODO
-// function put_lodging(id, name, description, price){
-//     const key = datastore.key([LODGING, parseInt(id,10)]);
-//     const lodging = {"name": name, "description": description, "price": price};
-//     return datastore.save({"key":key, "data":lodging});
-// }
+// Delete a Boat
+function delete_boat(boat_id){
+  const key = datastore.key([BOAT, parseInt(boat_id,10)]);
+  return datastore.delete(key);
+}
 
-// // TODO
-// function delete_lodging(id){
-//     const key = datastore.key([LODGING, parseInt(id,10)]);
-//     return datastore.delete(key);
-// }
+// Delete a Slip
+function delete_slip(slip_id){
+  const key = datastore.key([SLIP, parseInt(slip_id,10)]);
+  return datastore.delete(key);
+}
+
+
+// creates a new slip
+function post_slip(number, current_boat = null){
+  var key = datastore.key(SLIP);
+  const new_slip = {"number": number, "current_boat": current_boat};
+  console.log("new slip: ", new_slip);
+	return datastore.save({"key":key, "data":new_slip}).then(() => {return key});
+}
+
+// get all slips
+function get_slips(){
+	const q = datastore.createQuery(SLIP);
+	return datastore.runQuery(q).then( (entities) => {
+			return entities[0].map(fromDatastore);
+		});
+}
+
+// get one slip
+function get_slip(slip_id){
+  const key = datastore.key([SLIP, parseInt(slip_id)]);
+  return datastore.get(key).then( (entity) => {
+    // console.log('Entity ', entity);
+      if (entity[0] === undefined) {
+        return '';
+      }
+      return entity.map(fromDatastore)[0];
+  });
+}
+
+// adds a boat to a slip
+function put_boat(slip_id, boat_id){
+  const slip_key = datastore.key([SLIP, parseInt(slip_id,10)]);
+  // console.log("slipKey: ", slip_key);
+  return datastore.get(slip_key)
+  .then( (slip) => {
+      // console.log("slip[0]: ", slip[0]);
+      if( slip[0].current_boat === null){
+        // console.log("inside if");
+        slip[0].current_boat = boat_id;
+      } else if (slip[0].current_boat !== null) {
+        return null;
+      }
+      // console.log("slip[0].currentBoat after push: ", slip[0].current_boat);
+      return datastore.save({"key":slip_key, "data":slip[0]});
+  });
+}
+
 
 /* ------------- End Model Functions ------------- */
 
@@ -156,16 +204,95 @@ router.patch('/boats/:boat_id', function(req, res){
   });
 });
 
-// // TODO
-// router.put('/:id', function(req, res){
-//     put_lodging(req.params.id, req.body.name, req.body.description, req.body.price)
-//     .then(res.status(200).end());
-// });
+// POST to create a boat
+router.post('/slips', function(req, res){
+  const fullUrl = req.protocol + '://' + req.get('host') + req.url + '/';
+  if (!req.body.number) {
+    res.status(400).json({ 
+      "Error":  "The request object is missing the required number" 
+    }); 
+    return;
+  }
+  post_slip(req.body.number, req.body.current_boat)
+  .then( key => {console.log("req.body: ", req.body);
+    res.status(201).json({ 
+      "id":  key.id, 
+      "number": req.body.number,
+      "current_boat": req.body.current_boat || null, 
+      "self": fullUrl + key.id
+    })} 
+  );
+});
 
-// // TODO
-// router.delete('/:id', function(req, res){
-//     delete_lodging(req.params.id).then(res.status(200).end())
-// });
+// GET to get all slips
+router.get('/slips', function(req, res){
+  const slips = get_slips()
+	.then( (slips) => {
+        res.status(200).json(slips);
+    });
+});
+
+// GET to get specific slip
+router.get('/slips/:slip_id', function(req, res){
+  const reqUrl = req.url;
+  const specificSlip = req.params.slip_id; // gets the id of the boat
+  const slip = get_slip(specificSlip)
+  .then( (slip) => {
+    if (slip) {
+      slip.self = req.protocol + '://' + req.get('host') + req.url;
+      return res.status(200).json(slip);
+    }
+    return res.status(404).json({"Error": "No slip with this slip_id exists"});
+  })
+});
+
+// Add a Boat to a Slip
+router.put('/slips/:slip_id/:boat_id', function(req, res){
+  console.log("Boat ID to get: ", req.params.boat_id);
+  get_boat(req.params.boat_id)
+  .then((boat) => {
+    if(boat === ''){
+      // console.log("Res: ", res);
+      return res.status(404).json({"Error": "The specified boat and/or slip don’t exist"});
+    } else {
+      get_slip(req.params.slip_id)
+      .then((slip) => {
+        if(slip === ''){
+          return res.status(404).json({"Error": "The specified boat and/or slip don’t exist"});
+        } else if (slip.current_boat !== null) {
+          res.status(403).json({"Error": "The slip is not empty"});
+        } else {
+            put_boat(req.params.slip_id, req.params.boat_id)
+            .then(res.status(204).end());
+          }
+      })
+    }
+  })
+});
+
+// Delete a slip route
+router.delete('/slips/:slip_id', function(req, res){
+  get_slip(req.params.slip_id)
+  .then((slip) => {
+    console.log("slip in Delete: ", slip);
+    if(slip === '') {
+      return res.status(404).json({"Error": "No slip with this slip_id exists"});
+    }
+    delete_slip(req.params.slip_id).then(res.status(204).end())
+  })
+});
+
+// Delete a boat route
+router.delete('/boats/:boat_id', function(req, res){
+  get_boat(req.params.boat_id)
+  .then((boat) => {
+    console.log("Boat in Delete: ", boat);
+    if(boat === '') {
+      return res.status(404).json({"Error": "No boat with this boat_id exists"});
+    }
+    delete_boat(req.params.boat_id).then(res.status(204).end())
+  })
+});
 
 /* ------------- End Controller Functions ------------- */
 
